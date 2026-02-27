@@ -9,6 +9,10 @@
  *     text editor switches to a Python (.py) or TypeScript (.ts) file and
  *     logs the filename being analyzed.
  *  3. Calls detectPrompts on file open and on every save.
+ *  4. Runs all four lint rules (output structure, ambiguity, tool usage,
+ *     determinism) against each detected prompt, computes a 0-100 reliability
+ *     score, and surfaces a VSCode diagnostic for every flagged rule prefixed
+ *     with the score (e.g. "[72/100] Prompt lacks output constraints...").
  *
  * Both the output channel and the listeners are pushed onto
  * `context.subscriptions` so VSCode disposes them automatically when the
@@ -18,6 +22,10 @@
 import * as vscode from 'vscode';
 import { detectPrompts, setOutputChannel } from './parser/promptDetector';
 import { analyzeOutputStructure } from './analyzer/rules/outputStructure';
+import { analyzeAmbiguity } from './analyzer/rules/ambiguity';
+import { analyzeToolUsage } from './analyzer/rules/toolUsage';
+import { analyzeDeterminism } from './analyzer/rules/determinism';
+import { scorePrompt } from './analyzer/scorer';
 
 /** The single shared output channel for the extension. */
 let outputChannel: vscode.OutputChannel | undefined;
@@ -37,20 +45,30 @@ function runDetection(document: vscode.TextDocument): void {
 
     const diagnostics: vscode.Diagnostic[] = [];
     for (const match of matches) {
-        const result = analyzeOutputStructure(match.content);
-        if (result.flagged) {
-            const startPos = new vscode.Position(match.line, 0);
-            const endLineText = document.lineAt(match.endLine).text;
-            const endPos = new vscode.Position(match.endLine, endLineText.length);
-            const range = new vscode.Range(startPos, endPos);
+        const results = [
+            analyzeOutputStructure(match.content),
+            analyzeAmbiguity(match.content),
+            analyzeToolUsage(match.content),
+            analyzeDeterminism(match.content),
+        ];
 
-            const diagnostic = new vscode.Diagnostic(
-                range,
-                result.message,
-                vscode.DiagnosticSeverity.Warning
-            );
-            diagnostic.source = 'Prompt Linter';
-            diagnostics.push(diagnostic);
+        const score = scorePrompt(results);
+
+        const startPos = new vscode.Position(match.line, 0);
+        const endLineText = document.lineAt(match.endLine).text;
+        const endPos = new vscode.Position(match.endLine, endLineText.length);
+        const range = new vscode.Range(startPos, endPos);
+
+        for (const result of results) {
+            if (result.flagged) {
+                const diagnostic = new vscode.Diagnostic(
+                    range,
+                    `[${score}/100] ${result.message}`,
+                    vscode.DiagnosticSeverity.Warning
+                );
+                diagnostic.source = 'Prompt Linter';
+                diagnostics.push(diagnostic);
+            }
         }
     }
     diagnosticCollection?.set(document.uri, diagnostics);
