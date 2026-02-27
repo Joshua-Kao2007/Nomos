@@ -17,9 +17,11 @@
 
 import * as vscode from 'vscode';
 import { detectPrompts, setOutputChannel } from './parser/promptDetector';
+import { analyzeOutputStructure } from './analyzer/rules/outputStructure';
 
 /** The single shared output channel for the extension. */
 let outputChannel: vscode.OutputChannel | undefined;
+let diagnosticCollection: vscode.DiagnosticCollection | undefined;
 
 function isSupportedFile(fileName: string): boolean {
     return fileName.endsWith('.py') || fileName.endsWith('.ts');
@@ -27,10 +29,31 @@ function isSupportedFile(fileName: string): boolean {
 
 function runDetection(document: vscode.TextDocument): void {
     if (!isSupportedFile(document.fileName)) {
+        diagnosticCollection?.delete(document.uri);
         return;
     }
     outputChannel?.appendLine(`Analyzing file: ${document.fileName}`);
-    detectPrompts(document);
+    const matches = detectPrompts(document);
+
+    const diagnostics: vscode.Diagnostic[] = [];
+    for (const match of matches) {
+        const result = analyzeOutputStructure(match.content);
+        if (result.flagged) {
+            const startPos = new vscode.Position(match.line, 0);
+            const endLineText = document.lineAt(match.endLine).text;
+            const endPos = new vscode.Position(match.endLine, endLineText.length);
+            const range = new vscode.Range(startPos, endPos);
+
+            const diagnostic = new vscode.Diagnostic(
+                range,
+                result.message,
+                vscode.DiagnosticSeverity.Warning
+            );
+            diagnostic.source = 'Prompt Linter';
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnosticCollection?.set(document.uri, diagnostics);
 }
 
 /**
@@ -40,6 +63,9 @@ export function activate(context: vscode.ExtensionContext): void {
     outputChannel = vscode.window.createOutputChannel('Prompt Linter');
     outputChannel.appendLine('Prompt Reliability Linter: Active ✓');
     context.subscriptions.push(outputChannel);
+
+    diagnosticCollection = vscode.languages.createDiagnosticCollection('prompt-linter');
+    context.subscriptions.push(diagnosticCollection);
 
     setOutputChannel(outputChannel);
 
@@ -68,4 +94,6 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
     outputChannel?.dispose();
     outputChannel = undefined;
+    diagnosticCollection?.dispose();
+    diagnosticCollection = undefined;
 }

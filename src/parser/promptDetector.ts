@@ -2,7 +2,9 @@ import * as vscode from 'vscode';
 
 export type PromptMatch = {
     line: number;
+    endLine: number;
     text: string;
+    content: string;
     variableName: string;
 };
 
@@ -69,7 +71,7 @@ export function detectPrompts(document: vscode.TextDocument): PromptMatch[] {
 
             const fullText = line.trimStart();
             logMatch(i, fullText);
-            matches.push({ line: i, text: fullText, variableName });
+            matches.push({ line: i, endLine: j, text: fullText, content, variableName });
             i = j + 1;
             continue;
         }
@@ -80,7 +82,7 @@ export function detectPrompts(document: vscode.TextDocument): PromptMatch[] {
             const variableName = singleLineMatch[1];
             const fullText = line.trimStart();
             logMatch(i, fullText);
-            matches.push({ line: i, text: fullText, variableName });
+            matches.push({ line: i, endLine: i, text: fullText, content: fullText, variableName });
             i++;
             continue;
         }
@@ -104,7 +106,7 @@ export function detectPrompts(document: vscode.TextDocument): PromptMatch[] {
             if (content.trim().length > 50) {
                 const fullText = line.trimStart();
                 logMatch(i, fullText);
-                matches.push({ line: i, text: fullText, variableName: '' });
+                matches.push({ line: i, endLine: j, text: fullText, content, variableName: '' });
             }
             i = j + 1;
             continue;
